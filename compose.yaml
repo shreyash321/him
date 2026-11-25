@@ -1,0 +1,103 @@
+services:
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      SESSION_SECRET: ${SESSION_SECRET:-local-development-secret-change-before-deploying}
+      DATABASE_URL: postgresql+asyncpg://app:local-dev-password@postgres:5432/newgen
+      REDIS_URL: redis://redis:6379/0
+      UPSTREAM_ORIGIN: ${UPSTREAM_ORIGIN:-https://matkaonline.games}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      SESSION_SECRET: ${SESSION_SECRET:-local-development-secret-change-before-deploying}
+      DATABASE_URL: postgresql+asyncpg://app:local-dev-password@postgres:5432/newgen
+      REDIS_URL: redis://redis:6379/0
+      AUTH_REDIS_URL: redis://auth-redis:6379/0
+      UPSTREAM_ORIGIN: ${UPSTREAM_ORIGIN:-https://matkaonline.games}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      RESULTS_REFRESH_SECONDS: ${RESULTS_REFRESH_SECONDS:-60}
+      PAGE_CACHE_SECONDS: ${PAGE_CACHE_SECONDS:-300}
+      ASSET_CACHE_SECONDS: ${ASSET_CACHE_SECONDS:-86400}
+      STALE_CACHE_SECONDS: ${STALE_CACHE_SECONDS:-3600}
+      UPSTREAM_REQUESTS_PER_SECOND: ${UPSTREAM_REQUESTS_PER_SECOND:-5}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-127.0.0.1}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: newgen
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: local-dev-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d newgen"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - auth-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+  auth-redis-data:

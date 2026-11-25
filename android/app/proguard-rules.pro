@@ -1,0 +1,2 @@
+-keep class com.dhanraj.app.data.** { *; }
+-keepattributes Signature
